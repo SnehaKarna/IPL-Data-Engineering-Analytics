@@ -1,12 +1,11 @@
-# Data
+# Project data
 
-The IPL datasets are stored in Amazon S3 and processed through Databricks using Apache Spark.
+The app uses small, versioned Gold snapshots in `data/gold/` for local development. The Streamlit Overview uses the CSV exports in this folder. These files are intentionally kept in Git so a clone can run without Databricks access.
 
-Raw data:
-`s3://ipl-2010-data/Raw/`
+The original raw CSV datasets and full Silver history are not stored in this repository. Databricks source and Delta data use the Unity Catalog Volume:
 
-Processed Silver and Gold data:
-`s3://ipl-2010-data/Silver/`
-`s3://ipl-2010-data/Gold/`
+`/Volumes/workspace/default/ipl_data`
 
-Raw and processed datasets are not included in this repository because they are large and are maintained in the project's S3 data lake.
+The retained pipeline expects raw CSVs in `Raw/` and writes Silver plus its current Gold outputs under the same Volume. Gold exports are not synchronized automatically: copy refreshed Parquet snapshots into `data/gold/` when available, then rerun `python -m rag.vector_store` to refresh Qdrant.
+
+See the root README for local app setup and the Spark pipeline's eight Gold outputs. The checked-in local snapshots currently cover the six tables consumed by the assistant.

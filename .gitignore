@@ -13,6 +13,7 @@ env/
 # Databricks / Spark
 .databricks/
 *.log
+.qdrant/
 
 # Streamlit
 .streamlit/secrets.toml
@@ -20,7 +21,21 @@ env/
 # Local data
 *.csv
 *.parquet
+!data/*.csv
+!data/gold/*.parquet
+models/*.joblib
 
 # OS
 .DS_Store
 Thumbs.db
+
+
+# Virtual Environment
+.venv/
+
+# Secrets
+.env
+
+# Python Cache
+__pycache__/
+*.pyc

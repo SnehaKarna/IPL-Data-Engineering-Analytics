@@ -1,3 +1,10 @@
 streamlit
 pandas
 plotly
+pyarrow
+langchain-ollama
+qdrant-client
+python-dotenv
+scikit-learn
+joblib
+boto3
