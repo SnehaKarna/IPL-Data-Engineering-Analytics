@@ -18,7 +18,6 @@ VENUE_NAME_ALIASES = {
     "maharashtra cricket association stadium, pune": "Maharashtra Cricket Association Stadium",
     "maharaja yadavindra singh international cricket stadium, new chandigarh": "Maharaja Yadavindra Singh International Cricket Stadium, Mullanpur",
     "narendra modi stadium, ahmedabad": "Narendra Modi Stadium",
-    "sardar patel stadium, motera": "Narendra Modi Stadium",
     "punjab cricket association is bindra stadium, mohali": "Punjab Cricket Association IS Bindra Stadium",
     "punjab cricket association is bindra stadium, mohali, chandigarh": "Punjab Cricket Association IS Bindra Stadium",
     "punjab cricket association stadium, mohali": "Punjab Cricket Association IS Bindra Stadium",
@@ -57,7 +56,6 @@ VENUE_NAME_VARIANTS = {
     ),
     "Narendra Modi Stadium": (
         "Narendra Modi Stadium, Ahmedabad",
-        "Sardar Patel Stadium, Motera",
     ),
     "Punjab Cricket Association IS Bindra Stadium": (
         "Punjab Cricket Association IS Bindra Stadium, Mohali",

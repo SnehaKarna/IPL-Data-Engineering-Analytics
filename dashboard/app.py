@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from agentic.team_names import TEAM_NAME_VARIANTS, normalize_team_performance
-from agentic.venue_names import VENUE_NAME_VARIANTS
+from agentic.venue_names import VENUE_NAME_VARIANTS, normalize_venue_strategy
 from ml.chase_prediction import ChasePredictionTool
 
 
@@ -164,7 +164,7 @@ def render_overview() -> None:
         batsmen = load_csv("top_batsmen.csv")
         bowlers = load_csv("top_bowlers.csv")
         teams = normalize_team_performance(data["team_performance"])
-        venue = data["venue_strategy"]
+        venue = normalize_venue_strategy(data["venue_strategy"])
         phase = data["phase_analysis"].copy()
     except Exception as exc:
         st.error(f"Could not load overview data: {exc}")
@@ -278,7 +278,7 @@ def render_venue_teams() -> None:
     data = required_tables(("venue_strategy", "team_performance", "toss_analysis"))
     if data is None:
         return
-    venue = data["venue_strategy"].copy()
+    venue = normalize_venue_strategy(data["venue_strategy"])
     teams = normalize_team_performance(data["team_performance"])
     page_header("ANALYTICS / VENUE & TEAMS", "Ground and franchise intelligence", "Keep ground-wide trends distinct from franchise-wide results. These aggregates do not imply venue-specific team performance.")
     left, right = st.columns(2)

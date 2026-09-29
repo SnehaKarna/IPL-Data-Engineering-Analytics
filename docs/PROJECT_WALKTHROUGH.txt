@@ -1,0 +1,443 @@
+IPL STRATEGY INTELLIGENCE
+PROJECT WALKTHROUGH
+====================
+
+Purpose
+-------
+
+This file explains how the repository works from raw cricket records through the data pipeline, application, analytics tools, retrieval, and prediction. It is a technical project guide, not the public project landing page. README.md is the short GitHub overview.
+
+
+1. PRODUCT OVERVIEW
+-------------------
+
+IPL Strategy Intelligence is a cricket analytics data platform with a local AI-assisted decision-support application. Its data engineering layer transforms match and ball-by-ball records into structured Silver and Gold data. The application presents analytics and accepts natural-language questions. One IPL Strategy Agent selects deterministic analytics, Gold-backed semantic retrieval, or an optional chase-state model based on the question.
+
+The key responsibility split is:
+
+  - PySpark validates, enriches, and aggregates source data.
+  - Gold tables hold reusable analytics at a defined grain.
+  - Python analytics tools perform exact filtering and calculations on local snapshots.
+  - Qdrant finds relevant text summaries created from Gold data.
+  - The scikit-learn model estimates a chase outcome from explicit live-state inputs.
+  - Ollama plans tool use and explains returned evidence.
+  - Streamlit is the analyst-facing interface.
+
+The language model is not expected to invent or calculate structured statistics. Tools own the values; the model explains their meaning and limitations.
+
+
+2. END-TO-END ARCHITECTURE
+-------------------------
+
+Source CSVs
+    -> PySpark source validation and standardization
+    -> Silver delivery-grain records enriched with match metadata
+    -> Eight Gold analytics outputs
+    -> Local Parquet snapshots and overview CSVs
+    -> Streamlit analytics and the strategy-agent tools
+
+For the AI question path:
+
+Question
+    -> IPLStrategyAgent plans which sources are useful
+    -> Gold analytics query, Qdrant retrieval, and/or chase model
+    -> Tool evidence, source labels, and limitations are combined
+    -> Ollama produces an evidence-grounded explanation
+    -> Streamlit displays answer, metrics, sources, and tool trace
+
+The data pipeline and local app run as separate layers. Spark is responsible for building Silver and Gold in its configured Volume. The Streamlit application reads exported snapshots under data/gold and does not connect to a Spark cluster. RAG vectors are generated locally from those snapshots. When Gold snapshots change, the local RAG index should be rebuilt.
+
+
+3. SOURCE DATA AND GRAIN
+------------------------
+
+The pipeline expects these files in its configured Raw directory:
+
+  Match_Info.csv
+    Match date, competing teams, toss, result, winner, venue, and other match data.
+
+  Ball_By_Ball_Match_Data.csv
+    Delivery events including match ID, innings, over, ball number, batter,
+    bowler, batter runs, extras, total runs, wicket and dismissal information.
+
+  teams_info.csv
+    Team reference information.
+
+  2024_players_details.csv
+    Player roster used to validate names appearing in delivery data.
+
+The intended event grain is one row per source delivery. Match metadata is attached by joining the delivery ID to the match number. The pipeline hashes all source delivery fields to build a stable row identity. It does not rely on match + innings + over + ball being unique, because the supplied data has tied-match Super Over collisions.
+
+
+4. SOURCE CHECKS AND SILVER PROCESSING
+--------------------------------------
+
+pipeline/ipl_pipeline.py reads the CSVs, standardizes types, validates inputs, enriches delivery rows with match metadata, and handles incremental Delta writes. pipeline/quality.py contains the reusable checks.
+
+The checks include:
+
+  - Required input columns and expected data types.
+  - Null checks on critical match and delivery fields.
+  - Unique match IDs and unique full-row delivery hashes.
+  - Delivery match IDs must resolve to match metadata.
+  - Batter, bowler, non-striker, and player-out names must resolve to the roster
+    by normalized full name or first-initial-plus-surname.
+  - Observed calendar seasons must not contain gaps between first and last year.
+  - Delivery row count must not change beyond a configured threshold from the
+    prior pipeline run.
+
+Silver is a typed delivery table with match date, team names, toss context,
+winner, venue, innings and ball coordinates, batter/bowler identity, runs,
+extras, wicket, dismissal, and batting team. The delivery hash allows exact
+source rows to be merged consistently.
+
+
+5. INCREMENTAL PROCESSING
+-------------------------
+
+The pipeline computes a match-level manifest. It fingerprints match metadata
+and a sorted collection of hashes for that match's deliveries. On refresh, it
+compares the current manifest to the saved manifest to find new or changed
+matches. It recomputes those matches, merges their Silver rows, and updates the
+manifest. Unchanged matches do not need to be fully reprocessed.
+
+This makes pipeline reruns safer and more efficient than blindly appending all
+records. The delivery key supports idempotent upserts; the match manifest
+determines the change scope.
+
+
+6. GOLD ANALYTICS PRODUCTS
+--------------------------
+
+The pipeline creates eight outputs:
+
+  player_matchups
+    Grain: batter and bowler. Measures: matches, legal balls faced, batter
+    runs, strike rate, credited dismissals, and boundary runs. Wides and
+    no-balls are not counted as legal balls faced. Run-outs, retired hurt, and
+    obstructing-the-field dismissals are not charged as bowler dismissals.
+
+  player_form
+    Grain: batter. Measures: matches, total runs, average runs per match,
+    fours, and sixes.
+
+  team_performance
+    Grain: canonical franchise. Measures: matches played, wins, and win
+    percentage. Known franchise aliases are normalized, such as Bangalore and
+    Bengaluru, Delhi Daredevils and Delhi Capitals, and Kings XI Punjab and
+    Punjab Kings.
+
+  toss_analysis
+    Grain: toss decision. Measures: matches, toss-winner victories, and win
+    percentage.
+
+  venue_strategy
+    Grain: source venue label in pipeline output. Measures: match count,
+    average first- and second-innings scores, and chase-win percentage.
+
+  phase_analysis
+    Grain: Powerplay, Middle, or Death. Measures: deliveries, runs, fours,
+    sixes, and wickets. The pipeline detects whether overs are zero-based or
+    one-based before assigning phases.
+
+  top_batsmen
+    Batter leaderboard by total runs and matches played.
+
+  top_bowlers
+    Bowler wicket leaderboard excluding dismissal types that are not credited
+    to the bowler.
+
+The Spark job reconciles source delivery counts and batter runs through Silver
+and Gold, checks team appearances, validates toss totals, and checks that Gold
+business keys are present and unique. These controls catch common ingestion
+and aggregation problems, but they cannot detect every semantic ambiguity in
+the source encoding.
+
+
+7. LOCAL DATA SNAPSHOT AND RELIABILITY
+--------------------------------------
+
+The local CSV files reviewed for this project contain 1,243 matches and
+295,732 delivery rows, dated 2008-04-18 through 2026-05-31. The match IDs are
+unique. Every delivery match ID joins to match metadata. No exact duplicate
+delivery rows were found, and TotalRun equals BatsmanRun plus ExtrasRun on
+every row. The 25 null winners correspond to 16 tied matches and 9 no-results.
+
+The endpoint aligns with the official IPL 2026 Final on 31 May 2026:
+https://www.iplt20.com/photos/final
+
+The same CSV filenames are present in a public dataset repository updated on
+2 June 2026:
+https://github.com/ritesh-ojha/IPL-DATASET/commit/main
+
+However, the local S3 objects have not been checksum-compared to that public
+repository. The data's exact provenance is therefore not independently
+verified. Describe it as locally checked, not as authoritative or perfect.
+
+SUPER OVER COORDINATE LIMITATION
+
+All 16 tied matches have Super Over deliveries represented with Innings = 2,
+Overs = 0, reusing ball coordinates from the regular second innings. The CSV
+does not contain an explicit Super Over indicator. These are real records and
+are retained. Guessing which rows to delete or relabel would risk losing
+valid data.
+
+The ambiguity can affect regular second-innings totals, batter-bowler
+matchups, and phase aggregates if they treat innings/over/ball coordinates as
+unique regular deliveries. The chase trainer excludes tied matches because
+they have no winner, but that does not repair the source representation for
+other all-time aggregates. A corrected source with an explicit innings and
+Super Over field is needed before claiming all affected statistics are exact.
+
+TEAM IDENTITIES
+
+The all-time dataset has 15 canonical franchise identities. These include
+ten current franchises and historical franchises that were discontinued or
+renamed. Fifteen is expected for multi-season history; deleting the historic
+teams would remove valid results.
+
+VENUE IDENTITIES
+
+The Gold venue snapshot contains 60 source labels. Known spelling,
+punctuation, and city-suffix variants normalize to 38 displayed venue
+identities in the dashboard, analytics layer, and RAG documents. The
+historical Sardar Patel Stadium, Motera label remains separate from Narendra
+Modi Stadium so different ground eras are not silently merged. The original
+Gold Parquet rows remain at source label grain.
+
+
+8. ONE AGENT, MULTIPLE TOOLS
+----------------------------
+
+The Streamlit app loads IPLStrategyAgent from agentic/strategy_agent.py. This
+is one tool-using agent, not a multi-agent architecture. It has a planner,
+tool implementations, evidence handling, and answer generation. The planner
+is a component of the agent, not another agent.
+
+The planner asks the configured Ollama chat model to return a constrained
+JSON plan containing:
+
+  - Gold table names to query;
+  - whether contextual RAG retrieval is useful;
+  - whether chase prediction is requested.
+
+Table names are checked against an allowlist. Local rules supplement and
+validate the plan, including checking for supported table intent and
+resolvable player matchup entities. If the planner fails, rule-based routing
+is used and a limitation is shown. The system does not give the LLM arbitrary
+database or shell access.
+
+The tools are:
+
+  Gold analytics
+    GoldDataQueryTool loads local Parquet files with pandas. GoldAnalyticsTool
+    resolves names and applies deterministic filters, returning source-labelled
+    rows and scope notes.
+
+  RAG retrieval
+    Searches semantic documents derived from Gold summaries. It is useful for
+    related context, not for exact calculations over raw deliveries.
+
+  Chase prediction
+    Calls a fitted scikit-learn model when a user supplies all required live
+    state features in the question.
+
+The agent combines evidence and sends it to Ollama for a natural-language
+answer. The UI displays the answer, supporting metrics, source tables, tools
+called, and caveats.
+
+
+9. EXAMPLE QUESTION PATH
+------------------------
+
+Question: "Should we chase at Wankhede against CSK?"
+
+  1. The planner and local rules identify a venue question, a team reference,
+     and a request for strategy context.
+  2. venue_strategy can return historical results across all teams at
+     Wankhede. team_performance can return CSK's all-venue record.
+  3. RAG may retrieve Gold-derived text about the selected venue or franchise.
+  4. The evidence grain is checked: an all-venue CSK aggregate plus an
+     all-team Wankhede aggregate does not equal CSK's Wankhede record.
+  5. The live chase model cannot predict a current chase without score,
+     remaining balls, wickets, current run rate, and required run rate.
+  6. Ollama explains the historical evidence while the UI exposes the
+     limitation. It should not imply that a live prediction was made.
+
+This illustrates the actual agent value: deciding which evidence sources to
+combine for a compound question, while respecting what those sources measure.
+
+
+10. WHY BOTH ANALYTICS AND RAG?
+------------------------------
+
+An exact question such as "Show Kohli's record against Bumrah" needs a
+deterministic lookup in player_matchups. The LLM should not calculate the
+answer from memory. A contextual question such as "Summarize CSK's strengths"
+can use several Gold-derived summaries, while also stating when the available
+tables do not contain the requested breakdown.
+
+The RAG corpus is created by rag/build_documents.py from player form, team,
+venue, toss, and phase Gold summaries. High-cardinality player-vs-bowler rows
+are intentionally queried directly rather than embedding every pair. Ollama
+nomic-embed-text produces vectors. rag/vector_store.py stores them in Qdrant
+with source/entity metadata and stable IDs. rag/retriever.py performs
+similarity search and supports source filters.
+
+This is retrieval from this project's Gold data, not internet search and not
+a full text archive of IPL articles or every delivery.
+
+
+11. CHASE MODEL
+---------------
+
+The local trainer in ml/train_chase_model.py constructs second-innings states
+with five features:
+
+  runs_required
+  balls_remaining
+  wickets_remaining
+  current_run_rate
+  required_run_rate
+
+It trains a scikit-learn pipeline using StandardScaler and LogisticRegression.
+GroupShuffleSplit assigns complete matches to either training or validation,
+reducing leakage from putting deliveries of the same match on both sides. It
+reports ROC-AUC and writes models/chase_model.joblib.
+
+The prediction adapter reads feature_names_in_ from the artifact and aligns
+input columns to that order. PredictionTool accepts explicit feature=value
+input, checks for every required model feature, and returns a probability.
+It does not guess missing live state.
+
+The documented local fallback run reached ROC-AUC 0.877 for its grouped
+validation split. This is one evaluation result, not proof of future-season
+generalization. It does not reproduce the earlier approximately 0.716 result
+unless the data, features, label construction, and split match. The current
+model estimates a chase outcome from the live state; it does not answer a
+toss-time decision alone. Player identities, pitch, weather, and other
+context are not features. The trained artifact is excluded from Git.
+
+
+12. STREAMLIT WORKSPACES
+-----------------------
+
+Overview
+  Headline measures, franchise ranking, venue trends, innings phases, and
+  batting/bowling leaderboards.
+
+Player matchup
+  Select a batter and bowler and inspect meetings, balls faced, runs, strike
+  rate, dismissals, and boundary runs.
+
+Venue & teams
+  Explore venue scoring/chasing history, compare team-level results, and
+  inspect toss context. Venue-wide and team-wide aggregates remain separate
+  grains.
+
+Chase prediction
+  Enter a live chase state and view the estimated probability and exact model
+  inputs.
+
+Strategy assistant
+  Ask natural-language questions and inspect the answer, evidence metrics,
+  sources, tools used, and limitations.
+
+Data & model
+  Inspect local Gold table availability, row counts, model presence, and AI
+  configuration status.
+
+
+13. LOCAL SETUP
+---------------
+
+Requirements: Python 3.10 or newer, Ollama running locally, the local Gold
+snapshots, and the models phi3:mini and nomic-embed-text.
+
+From the project root in PowerShell:
+
+  python -m venv .venv
+  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+  if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+  ollama pull phi3:mini
+  ollama pull nomic-embed-text
+
+Build or refresh the local Qdrant index after Gold snapshots change:
+
+  .\.venv\Scripts\python.exe -m rag.vector_store
+
+Run the app:
+
+  .\.venv\Scripts\python.exe -m streamlit run dashboard/app.py
+
+To train the local chase model from the supplied raw files:
+
+  .\.venv\Scripts\python.exe -m ml.train_chase_model `
+    --matches "data/raw/Match_Info (2).csv" `
+    --deliveries "data/raw/Ball_By_Ball_Match_Data (1).csv"
+
+The model artifact is written to models/chase_model.joblib and ignored by Git.
+Raw files are also private/local and must not be committed. A pipeline refresh
+requires the compatible Spark/Delta runtime and access to the configured data
+Volume. The Streamlit app can run locally from the checked-in snapshots.
+
+
+14. IMPORTANT FILES
+-------------------
+
+pipeline/ipl_pipeline.py
+  PySpark input preparation, incremental processing, Silver, Gold, and
+  reconciliation.
+
+pipeline/quality.py
+  Reusable fail-fast Spark data quality checks.
+
+agentic/strategy_agent.py
+  The active one-agent planner, routing, evidence merge, and response
+  generation.
+
+agentic/tools.py
+  Deterministic Gold query wrapper and chase prediction tool.
+
+agentic/analytics.py
+  Parquet loading, canonical team/venue normalization, filters, and
+  calculations.
+
+rag/build_documents.py, rag/embeddings.py, rag/vector_store.py,
+rag/retriever.py
+  Gold text generation, embedding model, Qdrant indexing, and retrieval.
+
+ml/train_chase_model.py, ml/chase_prediction.py
+  Model training, evaluation, artifact loading, feature validation, and
+  inference.
+
+dashboard/app.py
+  Streamlit workspace navigation, visualizations, prediction form, chat, and
+  evidence trace.
+
+agentic/agent.py
+  Older deterministic analytics-agent implementation. The current Streamlit
+  app loads IPLStrategyAgent from strategy_agent.py.
+
+
+15. CURRENT LIMITATIONS AND NEXT DATA IMPROVEMENTS
+-------------------------------------------------
+
+  - Add a source field that explicitly identifies Super Overs and rebuild
+    affected Silver/Gold outputs.
+  - Verify source provenance with published checksums or a trusted manifest.
+  - Add season-grained Gold outputs for year-by-year analysis.
+  - Add team-by-venue aggregates for exact franchise-at-ground questions.
+  - Add bowler-by-phase aggregates for death-over effectiveness questions.
+  - Evaluate model calibration and temporal generalization, not only one
+    match-grouped ROC-AUC.
+  - Automate Gold snapshot export and RAG reindexing to prevent local copies
+    from becoming stale.
+
+
+Attribution
+-----------
+
+Copyright (c) 2026 @SnehaKarna. All rights reserved for project-authored code
+and documentation unless a separate license is added. IPL data and third-party
+packages/assets remain subject to their respective owners' terms.
